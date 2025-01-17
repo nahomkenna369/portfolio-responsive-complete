@@ -1,0 +1,54 @@
+pipeline {
+    agent any
+    environment {
+        GIT_CREDENTIALS = 'github-token' // ID of the GitHub PAT credentials in Jenkins
+        SSH_CREDENTIALS = 'ec2-key-credential' // ID of the EC2 SSH key credentials in Jenkins
+        EC2_USER = 'ec2-user' // Default EC2 username for Amazon Linux
+        EC2_HOST = '<EC2-PUBLIC-IP>' // Replace with the EC2 instance's public IP
+        APP_DIR = '/home/ec2-user/app' // Directory on the EC2 instance for deployment
+    }
+    stages {
+        stage('Clone Repository') {
+            steps {
+                echo 'Cloning GitHub repository...'
+                git branch: 'main', credentialsId: "${GIT_CREDENTIALS}", url: 'https://github.com/<YOUR-USERNAME>/<YOUR-REPOSITORY>.git'
+            }
+        }
+        stage('Build Application') {
+            steps {
+                echo 'Building application...'
+                sh '''
+                # Example: If this is a Node.js app, install dependencies
+                npm install
+                # Build the app (adjust based on your app type)
+                npm run build
+                '''
+            }
+        }
+        stage('Deploy to EC2') {
+            steps {
+                echo 'Deploying to EC2...'
+                sshagent([SSH_CREDENTIALS]) {
+                    sh '''
+                    # Copy application files to the EC2 instance
+                    scp -o StrictHostKeyChecking=no -r * ${EC2_USER}@${EC2_HOST}:${APP_DIR}/
+
+                    # SSH into EC2 and restart the application
+                    ssh -o StrictHostKeyChecking=no ${EC2_USER}@${EC2_HOST} << EOF
+                    cd ${APP_DIR}
+                    ./restart-app.sh
+                    EOF
+                    '''
+                }
+            }
+        }
+    }
+    post {
+        success {
+            echo 'Deployment completed successfully!'
+        }
+        failure {
+            echo 'Deployment failed. Please check the logs.'
+        }
+    }
+}
