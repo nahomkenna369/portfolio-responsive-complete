@@ -1,54 +1,60 @@
 pipeline {
     agent any
     environment {
-        GIT_CREDENTIALS = 'github-token' // ID of the GitHub PAT credentials in Jenkins
-        SSH_CREDENTIALS = 'ec2-key-credential' // ID of the EC2 SSH key credentials in Jenkins
-        EC2_USER = 'ec2-user' // Default EC2 username for Amazon Linux
-        EC2_HOST = '<EC2-PUBLIC-IP>' // Replace with the EC2 instance's public IP
-        APP_DIR = '/home/ec2-user/app' // Directory on the EC2 instance for deployment
+        EC2_USER = 'ec2-user'                      // Replace with your EC2 user (default is 'ec2-user')
+        EC2_HOST = 'YOUR_EC2_PUBLIC_IP'            // Replace with your EC2 instance public IP
+        PEM_FILE = 'path/to/your-key.pem'          // Replace with your private key path
+        HTML_REPO = 'https://github.com/your-repo' // Replace with your GitHub repository URL
     }
     stages {
-        stage('Clone Repository') {
+        stage('Checkout Code') {
             steps {
-                echo 'Cloning GitHub repository...'
-                git branch: 'main', credentialsId: "${GIT_CREDENTIALS}", url: 'https://github.com/<YOUR-USERNAME>/<YOUR-REPOSITORY>.git'
+                // Clone the HTML website repository from GitHub
+                git branch: 'main', url: "${HTML_REPO}"
             }
         }
-        stage('Build Application') {
+        stage('Prepare Deployment Files') {
             steps {
-                echo 'Building application...'
-                sh '''
-                # Example: If this is a Node.js app, install dependencies
-                npm install
-                # Build the app (adjust based on your app type)
-                npm run build
-                '''
+                script {
+                    // Archive the website files for transfer
+                    # sh 'tar -czf website.tar.gz *'
+                }
             }
         }
         stage('Deploy to EC2') {
             steps {
-                echo 'Deploying to EC2...'
-                sshagent([SSH_CREDENTIALS]) {
-                    sh '''
-                    # Copy application files to the EC2 instance
-                    scp -o StrictHostKeyChecking=no -r * ${EC2_USER}@${EC2_HOST}:${APP_DIR}/
-
-                    # SSH into EC2 and restart the application
-                    ssh -o StrictHostKeyChecking=no ${EC2_USER}@${EC2_HOST} << EOF
-                    cd ${APP_DIR}
-                    ./restart-app.sh
-                    EOF
-                    '''
-                }
+                // Transfer website files to the EC2 instance
+                sh """
+                scp -i ${PEM_FILE} website.tar.gz ${EC2_USER}@${EC2_HOST}:/tmp/
+                """
+            }
+        }
+        stage('Configure Nginx on EC2') {
+            steps {
+                // SSH into the EC2 instance and deploy the website with Nginx
+                sh """
+                ssh -i ${PEM_FILE} ${EC2_USER}@${EC2_HOST} << 'EOF'
+                    sudo yum update -y
+                    sudo amazon-linux-extras enable nginx1
+                    sudo yum install nginx -y
+                    # Extract and deploy the website files
+                    sudo mkdir -p /usr/share/nginx/html
+                    sudo tar -xzf /tmp/website.tar.gz -C /usr/share/nginx/html
+                    sudo rm -rf /usr/share/nginx/html/index.html # Remove default file
+                    # Start and enable Nginx
+                    sudo systemctl enable nginx
+                    sudo systemctl start nginx
+                EOF
+                """
             }
         }
     }
     post {
         success {
-            echo 'Deployment completed successfully!'
+            echo 'Deployment successful!'
         }
         failure {
-            echo 'Deployment failed. Please check the logs.'
+            echo 'Deployment failed. Check the logs for errors.'
         }
     }
 }
